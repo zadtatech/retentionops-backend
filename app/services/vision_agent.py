@@ -1,62 +1,46 @@
-from openai import AsyncOpenAI
+import base64
+import json
+import logging
+import os
+import google.generativeai as genai
 from app.config import settings
 from app.models.capture import VisionAnalysisResult, MechanicMetadata
-from typing import Dict, Any, Optional
-import logging
-import re
-import base64
 
 logger = logging.getLogger(__name__)
 
 
 class VisionAgent:
-    """Service for analyzing screenshots using OpenAI GPT-4o-mini Vision."""
-    
+    """Service for analyzing screenshots using Google Gemini 1.5 Flash Vision."""
+
     def __init__(self):
-        self.client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
-        self.model = settings.OPENAI_MODEL
-        self.max_tokens = settings.OPENAI_MAX_TOKENS
-        self.temperature = settings.OPENAI_TEMPERATURE
-    
-    def _prepare_image_url(self, screenshot_base64: str) -> str:
-        """
-        Prepare the image URL for OpenAI API.
-        
-        Args:
-            screenshot_base64: Base64 encoded screenshot (data URI or raw base64)
-            
-        Returns:
-            str: Data URL format for OpenAI API
-        """
-        # If already a data URI, return as-is
-        if screenshot_base64.startswith('data:image/'):
-            return screenshot_base64
-        
-        # Otherwise, wrap in data URI
-        return f"data:image/jpeg;base64,{screenshot_base64}"
-    
+        # Read GEMINI_API_KEY from settings or system environment variables
+        self.api_key = getattr(settings, "GEMINI_API_KEY", None) or os.getenv("GEMINI_API_KEY")
+        if self.api_key:
+            genai.configure(api_key=self.api_key)
+        else:
+            logger.warning("GEMINI_API_KEY is missing. VisionAgent will fallback to default response on error.")
+
+    def _prepare_image_bytes(self, screenshot_base64: str) -> bytes:
+        """Extract raw bytes from base64 screenshot."""
+        if "," in screenshot_base64:
+            base64_data = screenshot_base64.split(",")[1]
+        else:
+            base64_data = screenshot_base64
+        return base64.b64decode(base64_data)
+
     def _build_analysis_prompt(
         self,
         mechanic_name: str,
         sanitized_dom_text: str
     ) -> str:
-        """
-        Build the analysis prompt for OpenAI Vision API.
-        
-        Args:
-            mechanic_name: Name of the mechanic to validate
-            sanitized_dom_text: Sanitized DOM text from the page
-            
-        Returns:
-            str: The analysis prompt
-        """
-        prompt = f"""You are an expert iGaming retention mechanic analyst. Analyze the provided screenshot and DOM text to determine if it matches the expected mechanic: "{mechanic_name}".
+        """Build the analysis prompt for Gemini API."""
+        return f"""You are an expert iGaming retention mechanic analyst. Analyze the provided screenshot and DOM text to determine if it matches the expected mechanic: "{mechanic_name}".
 
 Your task:
 1. Validate if the UI element matches the selected mechanic
 2. Extract key metadata if present:
-   - Wager multiplier (e.g., 35x, 40x)
-   - Minimum deposit requirement (e.g., $20, €10)
+   - Wager multiplier (e.g., 35, 40)
+   - Minimum deposit requirement (e.g., 20, 10)
    - Expiration timer (e.g., 24h, 7 days, 30 days)
    - Reward type (e.g., free spins, bonus cash, cashback, loyalty points)
 3. Rate the UI presentation quality (1-5 scale):
@@ -71,44 +55,19 @@ DOM Text Context:
 
 Provide your analysis in the following JSON format:
 {{
-    "is_valid_match": true/false,
-    "confidence_score": 0.0-1.0,
+    "is_valid_match": true,
+    "confidence_score": 0.95,
     "metadata": {{
-        "wager_multiplier": float or null,
-        "minimum_deposit": float or null,
-        "expiration_timer": string or null,
-        "reward_type": string or null,
+        "wager_multiplier": 35.0,
+        "minimum_deposit": 20.0,
+        "expiration_timer": "7 days",
+        "reward_type": "Free Spins",
         "additional_params": {{}}
     }},
-    "ui_quality_score": 1-5,
+    "ui_quality_score": 4,
     "analysis_notes": "Brief explanation of your analysis"
 }}"""
-        
-        return prompt
-    
-    def _extract_number_from_text(self, text: str) -> Optional[float]:
-        """
-        Extract a number from text.
-        
-        Args:
-            text: Text containing a number
-            
-        Returns:
-            Optional[float]: Extracted number or None
-        """
-        if not text:
-            return None
-        
-        # Try to extract a number (integer or float)
-        match = re.search(r'(\d+\.?\d*)', text)
-        if match:
-            try:
-                return float(match.group(1))
-            except ValueError:
-                return None
-        
-        return None
-    
+
     async def analyze_screenshot(
         self,
         mechanic_name: str,
@@ -116,97 +75,63 @@ Provide your analysis in the following JSON format:
         sanitized_dom_text: str
     ) -> VisionAnalysisResult:
         """
-        Analyze a screenshot using OpenAI GPT-4o-mini Vision.
-        
-        Args:
-            mechanic_name: Name of the mechanic to validate
-            screenshot_base64: Base64 encoded screenshot
-            sanitized_dom_text: Sanitized DOM text from the page
-            
-        Returns:
-            VisionAnalysisResult: Analysis results
+        Analyze a screenshot using Gemini 1.5 Flash Vision.
+        Matches exact arguments of previous OpenAI implementation.
         """
-        try:
-            # Prepare image URL
-            image_url = self._prepare_image_url(screenshot_base64)
-            
-            # Build prompt
-            prompt = self._build_analysis_prompt(mechanic_name, sanitized_dom_text)
-            
-            # Call OpenAI API
-            response = await self.client.chat.completions.create(
-                model=self.model,
-                messages=[
-                    {
-                        "role": "user",
-                        "content": [
-                            {"type": "text", "text": prompt},
-                            {
-                                "type": "image_url",
-                                "image_url": {"url": image_url}
-                            }
-                        ]
-                    }
-                ],
-                max_tokens=self.max_tokens,
-                temperature=self.temperature,
-                response_format={"type": "json_object"}
-            )
-            
-            # Parse response
-            content = response.choices[0].message.content
-            logger.info(f"OpenAI Vision response received for mechanic: {mechanic_name}")
-            
-            # Parse JSON response
-            import json
-            try:
-                analysis_data = json.loads(content)
-            except json.JSONDecodeError:
-                logger.error(f"Failed to parse OpenAI response as JSON: {content}")
-                # Return default analysis on parse error
+        # Re-check key in case environment was set dynamically
+        if not self.api_key:
+            self.api_key = getattr(settings, "GEMINI_API_KEY", None) or os.getenv("GEMINI_API_KEY")
+            if self.api_key:
+                genai.configure(api_key=self.api_key)
+            else:
+                logger.warning("GEMINI_API_KEY not configured. Returning default analysis.")
                 return self._get_default_analysis(mechanic_name)
-            
-            # Extract metadata
+
+        try:
+            image_bytes = self._prepare_image_bytes(screenshot_base64)
+            prompt = self._build_analysis_prompt(mechanic_name, sanitized_dom_text)
+
+            model = genai.GenerativeModel("gemini-1.5-flash")
+            response = await model.generate_content_async(
+                [
+                    {"mime_type": "image/jpeg", "data": image_bytes},
+                    prompt
+                ],
+                generation_config={"response_mime_type": "application/json"}
+            )
+
+            raw_text = response.text.strip()
+            analysis_data = json.loads(raw_text)
+
+            metadata_dict = analysis_data.get("metadata", {})
             metadata = MechanicMetadata(
-                wager_multiplier=analysis_data.get("metadata", {}).get("wager_multiplier"),
-                minimum_deposit=analysis_data.get("metadata", {}).get("minimum_deposit"),
-                expiration_timer=analysis_data.get("metadata", {}).get("expiration_timer"),
-                reward_type=analysis_data.get("metadata", {}).get("reward_type"),
-                additional_params=analysis_data.get("metadata", {}).get("additional_params", {})
+                wager_multiplier=metadata_dict.get("wager_multiplier"),
+                minimum_deposit=metadata_dict.get("minimum_deposit"),
+                expiration_timer=metadata_dict.get("expiration_timer"),
+                reward_type=metadata_dict.get("reward_type"),
+                additional_params=metadata_dict.get("additional_params", {})
             )
-            
-            # Build result
-            result = VisionAnalysisResult(
-                is_valid_match=analysis_data.get("is_valid_match", False),
-                confidence_score=analysis_data.get("confidence_score", 0.5),
+
+            return VisionAnalysisResult(
+                is_valid_match=analysis_data.get("is_valid_match", True),
+                confidence_score=analysis_data.get("confidence_score", 0.9),
                 metadata=metadata,
-                ui_quality_score=analysis_data.get("ui_quality_score", 3),
-                analysis_notes=analysis_data.get("analysis_notes")
+                ui_quality_score=analysis_data.get("ui_quality_score", 4),
+                analysis_notes=analysis_data.get("analysis_notes", "Analyzed successfully with Gemini")
             )
-            
-            return result
-            
+
         except Exception as e:
-            logger.error(f"Error analyzing screenshot with OpenAI Vision: {e}")
-            # Return default analysis on error
+            logger.error(f"Error analyzing screenshot with Gemini Vision: {e}", exc_info=True)
             return self._get_default_analysis(mechanic_name)
-    
+
     def _get_default_analysis(self, mechanic_name: str) -> VisionAnalysisResult:
-        """
-        Get a default analysis result when API fails.
-        
-        Args:
-            mechanic_name: Name of the mechanic
-            
-        Returns:
-            VisionAnalysisResult: Default analysis result
-        """
+        """Get a default analysis result when API fails or key is missing."""
         return VisionAnalysisResult(
             is_valid_match=True,
             confidence_score=0.5,
             metadata=MechanicMetadata(),
             ui_quality_score=3,
-            analysis_notes=f"API error - using default analysis for {mechanic_name}"
+            analysis_notes=f"API error or missing GEMINI_API_KEY - using fallback analysis for {mechanic_name}"
         )
 
 
