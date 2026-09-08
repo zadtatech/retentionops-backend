@@ -9,8 +9,16 @@ class Settings(BaseSettings):
     SUPABASE_URL: str
     SUPABASE_KEY: str
     
-    # OpenAI Configuration
-    OPENAI_API_KEY: str
+    # Google Gemini Configuration
+    GEMINI_API_KEY: Optional[str] = None
+    GEMINI_MODEL: str = "gemini-flash-latest"
+    GEMINI_TEMPERATURE: float = 0.3
+    
+    # OpenAI Configuration (Optional / Legacy)
+    OPENAI_API_KEY: Optional[str] = None
+    OPENAI_MODEL: str = "gpt-4o-mini"
+    OPENAI_MAX_TOKENS: int = 1000
+    OPENAI_TEMPERATURE: float = 0.3
     
     # API Authentication
     API_AUTH_TOKEN: str
@@ -28,11 +36,6 @@ class Settings(BaseSettings):
         "http://127.0.0.1:3000",
         "http://127.0.0.1:8080",
     ]
-    
-    # OpenAI Vision Settings
-    OPENAI_MODEL: str = "gpt-4o-mini"
-    OPENAI_MAX_TOKENS: int = 1000
-    OPENAI_TEMPERATURE: float = 0.3
     
     # File Upload Settings
     MAX_UPLOAD_SIZE: int = 10 * 1024 * 1024  # 10MB
