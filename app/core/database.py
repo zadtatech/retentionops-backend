@@ -42,7 +42,6 @@ class SupabaseClient:
         metadata: Dict[str, Any],
         maturity_level: int,
         ui_quality_score: int,
-        notes: Optional[str] = None
     ) -> Dict[str, Any]:
         """Insert a mechanic audit record into the database."""
         client = cls.get_client()
@@ -57,7 +56,6 @@ class SupabaseClient:
             "metadata": metadata,
             "maturity_level": maturity_level,
             "ui_quality_score": ui_quality_score,
-            "notes": notes
         }
         
         try:
