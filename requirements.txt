@@ -10,10 +10,10 @@ pydantic-settings==2.1.0
 # OpenAI & Google Gemini for Vision API
 openai>=1.0.0
 google-generativeai>=0.8.0
-httpx==0.25.1
+httpx>=0.25.2
 
-# Supabase for database integration
-supabase>=2.0.0
+# Supabase for database integration (фикс конфликта с proxy)
+supabase>=2.8.0
 
 # PDF generation
 weasyprint==60.1
