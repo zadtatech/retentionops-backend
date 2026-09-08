@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 
 
 class VisionAgent:
-    """Service for analyzing screenshots using Google Gemini 1.5 Flash Vision."""
+    """Service for analyzing screenshots using Google Gemini Flash Latest."""
 
     def __init__(self):
         # Read GEMINI_API_KEY from settings or system environment variables
@@ -75,7 +75,7 @@ Provide your analysis in the following JSON format:
         sanitized_dom_text: str
     ) -> VisionAnalysisResult:
         """
-        Analyze a screenshot using Gemini 1.5 Flash Vision.
+        Analyze a screenshot using Gemini Flash Latest.
         Matches exact arguments of previous OpenAI implementation.
         """
         # Re-check key in case environment was set dynamically
@@ -91,7 +91,7 @@ Provide your analysis in the following JSON format:
             image_bytes = self._prepare_image_bytes(screenshot_base64)
             prompt = self._build_analysis_prompt(mechanic_name, sanitized_dom_text)
 
-            model = genai.GenerativeModel("gemini-1.5-flash")
+            model = genai.GenerativeModel("gemini-flash-latest")
             response = await model.generate_content_async(
                 [
                     {"mime_type": "image/jpeg", "data": image_bytes},
