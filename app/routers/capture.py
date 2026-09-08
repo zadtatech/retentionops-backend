@@ -7,7 +7,6 @@ from app.core.database import SupabaseClient
 from typing import Dict, Any
 import logging
 import uuid
-import base64
 
 logger = logging.getLogger(__name__)
 
@@ -29,14 +28,17 @@ async def create_capture(
     try:
         logger.info(f"Processing capture for brand: {request.brand_name}, mechanic: {request.selected_mechanic_name}")
         
-        # Step 1: Analyze screenshot with vision agent
+        # Step 1: Analyze screenshot with vision agent (Gemini)
+        logger.info("Step 1: Running Vision Agent analysis...")
         vision_analysis = await vision_agent.analyze_screenshot(
             mechanic_name=request.selected_mechanic_name,
             screenshot_base64=request.screenshot_base64,
             sanitized_dom_text=request.sanitized_dom_text
         )
+        logger.info(f"Vision analysis completed (isValid: {vision_analysis.is_valid_match}, quality: {vision_analysis.ui_quality_score})")
         
         # Step 2: Calculate maturity level using rule engine
+        logger.info("Step 2: Calculating maturity level...")
         maturity_level = rule_engine.calculate_maturity_level(
             mechanic_id=request.selected_mechanic_id,
             metadata=vision_analysis.metadata,
@@ -45,6 +47,7 @@ async def create_capture(
         )
         
         # Step 3: Detect red flags using rule engine
+        logger.info("Step 3: Detecting red flags...")
         red_flags = rule_engine.detect_red_flags(
             mechanic_id=request.selected_mechanic_id,
             metadata=vision_analysis.metadata,
@@ -52,8 +55,7 @@ async def create_capture(
             is_valid_match=vision_analysis.is_valid_match
         )
         
-        # Step 4: Prepare screenshot URL (in production, upload to storage)
-        # For now, we'll store a placeholder
+        # Step 4: Prepare screenshot URL placeholder
         screenshot_url = f"screenshots/{uuid.uuid4()}.jpg"
         
         # Step 5: Prepare metadata for database
@@ -67,34 +69,49 @@ async def create_capture(
             "is_valid_match": vision_analysis.is_valid_match
         }
         
-        # Step 6: Save audit log to database
-        audit_record = await SupabaseClient.insert_mechanic_audit(
-            brand_name=request.brand_name,
-            scenario=request.scenario,
-            mechanic_id=request.selected_mechanic_id,
-            mechanic_name=request.selected_mechanic_name,
-            screenshot_url=screenshot_url,
-            page_url=request.page_url,
-            metadata=metadata_dict,
-            maturity_level=maturity_level,
-            ui_quality_score=vision_analysis.ui_quality_score,
-            notes=request.notes
-        )
-        
-        # Step 7: Save red flags to database
-        for flag in red_flags:
-            await SupabaseClient.insert_red_flag(
-                audit_id=audit_record.get("id", str(uuid.uuid4())),
-                flag_type=flag.flag_type,
-                severity=flag.severity,
-                description=flag.description,
-                recommended_action=flag.recommended_action
+        # Step 6: Save audit log to Supabase
+        audit_id = str(uuid.uuid4())
+        audit_record = {}
+        try:
+            logger.info("Step 6: Saving audit log to Supabase...")
+            audit_record = await SupabaseClient.insert_mechanic_audit(
+                brand_name=request.brand_name,
+                scenario=request.scenario,
+                mechanic_id=request.selected_mechanic_id,
+                mechanic_name=request.selected_mechanic_name,
+                screenshot_url=screenshot_url,
+                page_url=request.page_url,
+                metadata=metadata_dict,
+                maturity_level=maturity_level,
+                ui_quality_score=vision_analysis.ui_quality_score,
+                notes=request.notes
             )
-        
+            if isinstance(audit_record, dict) and audit_record.get("id"):
+                audit_id = audit_record.get("id")
+            logger.info(f"Audit saved to Supabase with ID: {audit_id}")
+        except Exception as db_err:
+            logger.error(f"Supabase DB insert failed (check SUPABASE_KEY / SUPABASE_URL): {db_err}")
+            # Продвигаемся дальше, чтобы клиент получил результат анализа даже при сбое БД
+
+        # Step 7: Save red flags to database
+        if audit_record:
+            try:
+                logger.info("Step 7: Saving red flags to Supabase...")
+                for flag in red_flags:
+                    await SupabaseClient.insert_red_flag(
+                        audit_id=audit_id,
+                        flag_type=flag.flag_type,
+                        severity=flag.severity,
+                        description=flag.description,
+                        recommended_action=flag.recommended_action
+                    )
+            except Exception as flag_err:
+                logger.error(f"Failed to insert red flags into Supabase: {flag_err}")
+
         # Step 8: Build response
         response = CaptureResponse(
             success=True,
-            audit_id=audit_record.get("id"),
+            audit_id=audit_id,
             vision_analysis=vision_analysis,
             maturity_level=maturity_level,
             red_flags=red_flags
@@ -104,7 +121,7 @@ async def create_capture(
         return response
         
     except Exception as e:
-        logger.error(f"Error processing capture: {e}")
+        logger.error(f"Error processing capture: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error processing capture: {str(e)}"
@@ -116,6 +133,5 @@ async def health_check():
     """Health check endpoint for the capture service."""
     return {
         "status": "healthy",
-        "service": "capture",
-        "timestamp": "2024-01-01T00:00:00Z"
+        "service": "capture"
     }
