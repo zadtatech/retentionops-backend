@@ -84,7 +84,6 @@ async def create_capture(
                 metadata=metadata_dict,
                 maturity_level=maturity_level,
                 ui_quality_score=vision_analysis.ui_quality_score,
-                notes=request.notes
             )
             if isinstance(audit_record, dict) and audit_record.get("id"):
                 audit_id = audit_record.get("id")
