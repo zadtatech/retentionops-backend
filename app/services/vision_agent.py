@@ -10,15 +10,16 @@ logger = logging.getLogger(__name__)
 
 
 class VisionAgent:
-    """Service for analyzing screenshots using Google Gemini Flash Latest."""
+    """Service for analyzing screenshots using Google Gemini Vision."""
 
-    def __init__(self):
-        # Read GEMINI_API_KEY from settings or system environment variables
-        self.api_key = getattr(settings, "GEMINI_API_KEY", None) or os.getenv("GEMINI_API_KEY")
-        if self.api_key:
-            genai.configure(api_key=self.api_key)
-        else:
-            logger.warning("GEMINI_API_KEY is missing. VisionAgent will fallback to default response on error.")
+    def _get_clean_api_key(self) -> str | None:
+        """Retrieve and sanitize Gemini API key from settings or environment."""
+        raw_key = getattr(settings, "GEMINI_API_KEY", None) or os.getenv("GEMINI_API_KEY")
+        if raw_key:
+            # Очищаем от случайных пробелов, переносов строк и кавычек
+            cleaned_key = str(raw_key).strip().strip("'\"")
+            return cleaned_key if cleaned_key else None
+        return None
 
     def _prepare_image_bytes(self, screenshot_base64: str) -> bytes:
         """Extract raw bytes from base64 screenshot."""
@@ -75,23 +76,29 @@ Provide your analysis in the following JSON format:
         sanitized_dom_text: str
     ) -> VisionAnalysisResult:
         """
-        Analyze a screenshot using Gemini Flash Latest.
+        Analyze a screenshot using Gemini Flash.
         Matches exact arguments of previous OpenAI implementation.
         """
-        # Re-check key in case environment was set dynamically
-        if not self.api_key:
-            self.api_key = getattr(settings, "GEMINI_API_KEY", None) or os.getenv("GEMINI_API_KEY")
-            if self.api_key:
-                genai.configure(api_key=self.api_key)
-            else:
-                logger.warning("GEMINI_API_KEY not configured. Returning default analysis.")
-                return self._get_default_analysis(mechanic_name)
+        api_key = self._get_clean_api_key()
+
+        if not api_key:
+            logger.warning("GEMINI_API_KEY is missing or empty. Returning default analysis.")
+            return self._get_default_analysis(mechanic_name)
+
+        # Маскированное логгирование ключа для отладки
+        masked_key = f"{api_key[:6]}...{api_key[-4:]}" if len(api_key) > 10 else "INVALID_SHORT_KEY"
+        logger.info(f"Configuring Gemini Vision API with key: {masked_key}")
 
         try:
+            # Всегда конфигурируем перед запросом свежим ключом
+            genai.configure(api_key=api_key)
+
             image_bytes = self._prepare_image_bytes(screenshot_base64)
             prompt = self._build_analysis_prompt(mechanic_name, sanitized_dom_text)
 
-            model = genai.GenerativeModel("gemini-flash-latest")
+            model_name = getattr(settings, "GEMINI_MODEL", "gemini-flash-latest")
+            model = genai.GenerativeModel(model_name)
+
             response = await model.generate_content_async(
                 [
                     {"mime_type": "image/jpeg", "data": image_bytes},
