@@ -13,15 +13,23 @@ class SupabaseClient:
     
     @classmethod
     def get_client(cls) -> Client:
-        """Get or create Supabase client instance."""
+        """Get or create Supabase client instance with sanitized credentials."""
         if cls._instance is None:
-            cls._instance = create_client(
-                settings.SUPABASE_URL,
-                settings.SUPABASE_KEY
-            )
-            logger.info("Supabase client initialized")
+            # Очищаем URL и Key от случайных пробелов, переносов строк и кавычек
+            url = str(settings.SUPABASE_URL or "").strip().strip("'\"")
+            key = str(settings.SUPABASE_KEY or "").strip().strip("'\"")
+            
+            if not url or not key:
+                logger.error("SUPABASE_URL or SUPABASE_KEY is empty in settings!")
+                raise ValueError("Supabase credentials are missing")
+
+            key_preview = f"{key[:8]}...{key[-6:]}" if len(key) > 14 else "INVALID_LENGTH"
+            logger.info(f"Initializing Supabase client with URL: {url}, Key preview: {key_preview}")
+            
+            cls._instance = create_client(url, key)
+            logger.info("Supabase client initialized successfully")
         return cls._instance
-    
+
     @classmethod
     async def insert_mechanic_audit(
         cls,
@@ -36,24 +44,7 @@ class SupabaseClient:
         ui_quality_score: int,
         notes: Optional[str] = None
     ) -> Dict[str, Any]:
-        """
-        Insert a mechanic audit record into the database.
-        
-        Args:
-            brand_name: Name of the brand being audited
-            scenario: User scenario (e.g., "Registration / Onboarding")
-            mechanic_id: ID of the mechanic (1-26)
-            mechanic_name: Name of the mechanic
-            screenshot_url: URL to the screenshot
-            page_url: URL of the page
-            metadata: Extracted metadata from vision agent
-            maturity_level: Calculated maturity level (0-3)
-            ui_quality_score: UI quality score (1-5)
-            notes: Optional notes
-            
-        Returns:
-            Dict: The inserted record
-        """
+        """Insert a mechanic audit record into the database."""
         client = cls.get_client()
         
         data = {
@@ -76,7 +67,7 @@ class SupabaseClient:
         except Exception as e:
             logger.error(f"Error inserting mechanic audit: {e}")
             raise
-    
+
     @classmethod
     async def insert_red_flag(
         cls,
@@ -86,19 +77,7 @@ class SupabaseClient:
         description: str,
         recommended_action: str
     ) -> Dict[str, Any]:
-        """
-        Insert a red flag record into the database.
-        
-        Args:
-            audit_id: ID of the associated audit
-            flag_type: Type of flag (Tier 1 or Tier 2)
-            severity: Severity level
-            description: Description of the flag
-            recommended_action: Recommended action to resolve
-            
-        Returns:
-            Dict: The inserted record
-        """
+        """Insert a red flag record into the database."""
         client = cls.get_client()
         
         data = {
@@ -116,15 +95,10 @@ class SupabaseClient:
         except Exception as e:
             logger.error(f"Error inserting red flag: {e}")
             raise
-    
+
     @classmethod
     async def get_competitors(cls) -> List[Dict[str, Any]]:
-        """
-        Retrieve all competitors from the database.
-        
-        Returns:
-            List[Dict]: List of competitors
-        """
+        """Retrieve all competitors from the database."""
         client = cls.get_client()
         
         try:
@@ -133,7 +107,7 @@ class SupabaseClient:
         except Exception as e:
             logger.error(f"Error retrieving competitors: {e}")
             raise
-    
+
     @classmethod
     async def insert_competitor(
         cls,
@@ -141,17 +115,7 @@ class SupabaseClient:
         website: str,
         notes: Optional[str] = None
     ) -> Dict[str, Any]:
-        """
-        Insert a new competitor into the database.
-        
-        Args:
-            name: Competitor name
-            website: Competitor website
-            notes: Optional notes
-            
-        Returns:
-            Dict: The inserted record
-        """
+        """Insert a new competitor into the database."""
         client = cls.get_client()
         
         data = {
@@ -167,18 +131,10 @@ class SupabaseClient:
         except Exception as e:
             logger.error(f"Error inserting competitor: {e}")
             raise
-    
+
     @classmethod
     async def delete_competitor(cls, competitor_id: str) -> bool:
-        """
-        Delete a competitor from the database.
-        
-        Args:
-            competitor_id: ID of the competitor to delete
-            
-        Returns:
-            bool: True if successful
-        """
+        """Delete a competitor from the database."""
         client = cls.get_client()
         
         try:
@@ -188,21 +144,13 @@ class SupabaseClient:
         except Exception as e:
             logger.error(f"Error deleting competitor: {e}")
             raise
-    
+
     @classmethod
     async def get_mechanic_maturity_levels(
         cls,
         brand_name: Optional[str] = None
     ) -> List[Dict[str, Any]]:
-        """
-        Retrieve maturity levels for mechanics.
-        
-        Args:
-            brand_name: Optional brand name filter
-            
-        Returns:
-            List[Dict]: List of maturity levels
-        """
+        """Retrieve maturity levels for mechanics."""
         client = cls.get_client()
         
         try:
@@ -214,21 +162,13 @@ class SupabaseClient:
         except Exception as e:
             logger.error(f"Error retrieving maturity levels: {e}")
             raise
-    
+
     @classmethod
     async def get_red_flags(
         cls,
         severity: Optional[str] = None
     ) -> List[Dict[str, Any]]:
-        """
-        Retrieve red flags from the database.
-        
-        Args:
-            severity: Optional severity filter
-            
-        Returns:
-            List[Dict]: List of red flags
-        """
+        """Retrieve red flags from the database."""
         client = cls.get_client()
         
         try:
